@@ -27,8 +27,8 @@ export async function listPosts(userPhone: string): Promise<PostFeedItem[]> {
     .from("posts")
     .select("id,title,content,author_name,author_phone,like_count,comment_count,favorite_count,created_at")
     .order("created_at", { ascending: false });
-  let data = primary.data;
-  let error = primary.error;
+  let data: any[] | null = primary.data as any[] | null;
+  let error: any = primary.error;
   if (error) {
     // Backward compatibility for deployments without favorite_count column.
     const fallback = await client
