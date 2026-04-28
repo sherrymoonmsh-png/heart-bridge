@@ -7,13 +7,15 @@ import { getAuthedPhone, hydrateSessionFromSupabase, isAuthed } from "@/lib/auth
 import { toChineseErrorMessage } from "@/lib/error-message";
 import { hasSupabaseConfig, supabase } from "@/lib/supabase";
 import {
+  createActivitySignup,
   createActivity,
+  listActivitySignups,
   listActivities,
   toggleActivityFavorite,
   toggleActivityLike,
 } from "@/lib/community-service";
 import { listExploreItems } from "@/lib/explore-service";
-import { ActivityItem, ExploreItem } from "@/types/domain";
+import { ActivityItem, ActivitySignupItem, ExploreItem } from "@/types/domain";
 
 async function fetchProfilesRowBySession(): Promise<Record<string, unknown> | null> {
   if (!hasSupabaseConfig || !supabase) return null;
@@ -54,6 +56,13 @@ export default function ExplorePage() {
   const [loading, setLoading] = useState(true);
   const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState("");
+  const [activityExpanded, setActivityExpanded] = useState(false);
+  const [articleExpanded, setArticleExpanded] = useState(false);
+  const [activeActivity, setActiveActivity] = useState<ActivityItem | null>(null);
+  const [signupNickname, setSignupNickname] = useState("");
+  const [signupContact, setSignupContact] = useState("");
+  const [submittingSignup, setSubmittingSignup] = useState(false);
+  const [activitySignups, setActivitySignups] = useState<Record<string, ActivitySignupItem[]>>({});
   const [profileHint, setProfileHint] = useState("");
   const [contentHint, setContentHint] = useState("");
 
@@ -129,7 +138,7 @@ export default function ExplorePage() {
     }
     const [activitiesResult, articlesResult] = await Promise.allSettled([
       listActivities(currentPhone),
-      listExploreItems(),
+      listExploreItems(currentPhone),
     ]);
     if (activitiesResult.status === "fulfilled") {
       setActivities(activitiesResult.value);
@@ -210,6 +219,47 @@ export default function ExplorePage() {
     }
   };
 
+  const handleOpenActivity = async (item: ActivityItem) => {
+    setActiveActivity(item);
+    if (!profile?.is_admin) return;
+    try {
+      const rows = await listActivitySignups(item.id);
+      setActivitySignups((prev) => ({ ...prev, [item.id]: rows }));
+    } catch {
+      setActivitySignups((prev) => ({ ...prev, [item.id]: [] }));
+    }
+  };
+
+  const handleSubmitSignup = async () => {
+    if (!activeActivity) return;
+    if (!signupNickname.trim() || !signupContact.trim()) {
+      setError("请填写昵称和联系方式。");
+      return;
+    }
+    setSubmittingSignup(true);
+    setError("");
+    try {
+      await createActivitySignup({
+        activityId: activeActivity.id,
+        nickname: signupNickname.trim(),
+        contact: signupContact.trim(),
+      });
+      setSignupNickname("");
+      setSignupContact("");
+      if (profile?.is_admin) {
+        const rows = await listActivitySignups(activeActivity.id);
+        setActivitySignups((prev) => ({ ...prev, [activeActivity.id]: rows }));
+      }
+    } catch (err) {
+      setError(toChineseErrorMessage(err, "报名失败，请稍后重试。"));
+    } finally {
+      setSubmittingSignup(false);
+    }
+  };
+
+  const latestActivity = [...activities].sort((a, b) => Date.parse(b.startAt) - Date.parse(a.startAt))[0];
+  const latestArticle = articles[0];
+
   return (
     <main className="phone-shell px-4 pb-24 pt-5">
       <header className="mb-4 flex items-start justify-between gap-3">
@@ -282,56 +332,161 @@ export default function ExplorePage() {
         {!profile?.is_admin ? <p className="mt-2 text-xs text-neutral-500">管理员账号可发布</p> : null}
       </section>
 
-      <section className="mt-6 space-y-3">
-        <p className="text-xs text-neutral-400">线下活动招募</p>
-        {loading ? (
-          <article className="rounded-2xl bg-white p-4 text-sm text-neutral-500 shadow-sm">加载中...</article>
-        ) : null}
-        {!loading && activities.length === 0 ? (
-          <article className="rounded-2xl bg-white p-4 text-sm text-neutral-500 shadow-sm">暂无活动。</article>
-        ) : null}
-        {activities.map((item) => (
-          <article key={item.id} className="rounded-2xl bg-white p-4 shadow-sm">
-            <h3 className="font-semibold text-neutral-900">{item.title}</h3>
-            <p className="mt-1 text-sm text-neutral-600">{item.content}</p>
+      <section className="mt-6 rounded-2xl bg-white p-4 shadow-sm">
+        <button onClick={() => setActivityExpanded((prev) => !prev)} className="flex w-full items-center justify-between">
+          <p className="text-sm font-semibold text-neutral-900">线下活动招募</p>
+          <span className="text-xs text-neutral-500">{activityExpanded ? "收起" : "展开"}</span>
+        </button>
+        {!activityExpanded && latestActivity ? (
+          <article className="mt-3 rounded-xl bg-neutral-50 p-3">
+            <h3 className="font-semibold text-neutral-900">{latestActivity.title}</h3>
+            <p className="mt-1 text-sm text-neutral-600">{latestActivity.content}</p>
             <p className="mt-1 text-xs text-neutral-400">
-              {item.location} · {new Date(item.startAt).toLocaleString("zh-CN")}
+              {latestActivity.location} · {new Date(latestActivity.startAt).toLocaleString("zh-CN")}
             </p>
-            <div className="mt-3 flex gap-2">
-              <button
-                onClick={() => handleToggleActivityLike(item.id)}
-                className={`rounded-full px-3 py-1 text-xs ${
-                  item.likedByMe ? "bg-primary text-white" : "bg-neutral-100 text-neutral-600"
-                }`}
-              >
-                {item.likedByMe ? "已点赞" : "点赞"} {item.likeCount}
-              </button>
-              <button
-                onClick={() => handleToggleActivityFavorite(item.id)}
-                className={`rounded-full px-3 py-1 text-xs ${
-                  item.favoritedByMe ? "bg-neutral-800 text-white" : "bg-neutral-100 text-neutral-600"
-                }`}
-              >
-                {item.favoritedByMe ? "已收藏" : "收藏"} {item.favoriteCount}
-              </button>
-            </div>
           </article>
-        ))}
+        ) : null}
+        {!activityExpanded && !loading && !latestActivity ? <p className="mt-3 text-sm text-neutral-500">暂无活动。</p> : null}
+        {activityExpanded ? (
+          <div className="mt-3 space-y-3">
+            {activities.map((item) => (
+              <article key={item.id} className="rounded-xl border border-neutral-100 p-3">
+                <h3 className="font-semibold text-neutral-900">{item.title}</h3>
+                <p className="mt-1 text-sm text-neutral-600">{item.content}</p>
+                <p className="mt-1 text-xs text-neutral-400">
+                  {item.location} · {new Date(item.startAt).toLocaleString("zh-CN")}
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    onClick={() => handleToggleActivityLike(item.id)}
+                    className={`rounded-full px-3 py-1 text-xs ${
+                      item.likedByMe ? "bg-primary text-white" : "bg-neutral-100 text-neutral-600"
+                    }`}
+                  >
+                    {item.likedByMe ? "已点赞" : "点赞"} {item.likeCount}
+                  </button>
+                  <button
+                    onClick={() => handleToggleActivityFavorite(item.id)}
+                    className={`rounded-full px-3 py-1 text-xs ${
+                      item.favoritedByMe ? "bg-neutral-800 text-white" : "bg-neutral-100 text-neutral-600"
+                    }`}
+                  >
+                    {item.favoritedByMe ? "已收藏" : "收藏"} {item.favoriteCount}
+                  </button>
+                  <button
+                    onClick={() => handleOpenActivity(item)}
+                    className="rounded-full bg-primary px-3 py-1 text-xs font-semibold text-white"
+                  >
+                    了解详情
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : null}
       </section>
 
-      <section className="mt-6 space-y-3">
-        <p className="text-xs text-neutral-400">心理科普文章</p>
-        {!loading && articles.length === 0 ? (
-          <article className="rounded-2xl bg-white p-4 text-sm text-neutral-500 shadow-sm">暂无科普文章。</article>
-        ) : null}
-        {articles.map((item) => (
-          <article key={item.id} className="rounded-2xl bg-white p-4 shadow-sm">
-            <p className="text-xs text-primary">{item.category}</p>
-            <h3 className="mt-1 font-semibold text-neutral-900">{item.title}</h3>
-            <p className="mt-1 text-sm text-neutral-600">{item.summary}</p>
+      <section className="mt-6 rounded-2xl bg-white p-4 shadow-sm">
+        <button onClick={() => setArticleExpanded((prev) => !prev)} className="flex w-full items-center justify-between">
+          <p className="text-sm font-semibold text-neutral-900">心理科普文章</p>
+          <span className="text-xs text-neutral-500">{articleExpanded ? "收起" : "展开"}</span>
+        </button>
+        {!articleExpanded && latestArticle ? (
+          <article className="mt-3 rounded-xl bg-neutral-50 p-3">
+            <h3 className="font-semibold text-neutral-900">{latestArticle.title}</h3>
+            <p
+              className="mt-1 text-sm text-neutral-600"
+              style={{
+                display: "-webkit-box",
+                WebkitBoxOrient: "vertical",
+                WebkitLineClamp: 3,
+                overflow: "hidden",
+              }}
+            >
+              {latestArticle.summary}
+            </p>
           </article>
-        ))}
+        ) : null}
+        {!articleExpanded && !loading && !latestArticle ? <p className="mt-3 text-sm text-neutral-500">暂无科普文章。</p> : null}
+        {articleExpanded ? (
+          <div className="mt-3 space-y-3">
+            {articles.map((item) => (
+              <Link href={`/explore/article/${item.id}`} key={item.id} className="block rounded-xl border border-neutral-100 p-3">
+                <p className="text-xs text-primary">{item.category}</p>
+                <h3 className="mt-1 font-semibold text-neutral-900">{item.title}</h3>
+                <p
+                  className="mt-1 text-sm text-neutral-600"
+                  style={{
+                    display: "-webkit-box",
+                    WebkitBoxOrient: "vertical",
+                    WebkitLineClamp: 3,
+                    overflow: "hidden",
+                  }}
+                >
+                  {item.summary}
+                </p>
+              </Link>
+            ))}
+          </div>
+        ) : null}
       </section>
+
+      {activeActivity ? (
+        <section className="fixed inset-0 z-20 bg-black/50 p-4">
+          <article className="mx-auto mt-10 max-w-[460px] rounded-2xl bg-white p-4 shadow-lg">
+            <h3 className="font-semibold text-neutral-900">{activeActivity.title}</h3>
+            <p className="mt-1 text-xs text-neutral-500">{activeActivity.location}</p>
+            <p className="mt-1 text-xs text-neutral-500">{new Date(activeActivity.startAt).toLocaleString("zh-CN")}</p>
+            <p className="mt-3 text-sm text-neutral-700">{activeActivity.content}</p>
+
+            <div className="mt-4 rounded-xl bg-neutral-50 p-3">
+              <p className="text-xs text-neutral-500">报名参加</p>
+              <input
+                value={signupNickname}
+                onChange={(event) => setSignupNickname(event.target.value)}
+                placeholder="昵称"
+                className="mt-2 h-10 w-full rounded-xl border border-neutral-200 px-3 text-sm outline-none focus:border-primary"
+              />
+              <input
+                value={signupContact}
+                onChange={(event) => setSignupContact(event.target.value)}
+                placeholder="联系方式"
+                className="mt-2 h-10 w-full rounded-xl border border-neutral-200 px-3 text-sm outline-none focus:border-primary"
+              />
+              <button
+                onClick={handleSubmitSignup}
+                disabled={submittingSignup}
+                className="mt-3 h-10 w-full rounded-full bg-primary text-sm font-semibold text-white disabled:opacity-60"
+              >
+                {submittingSignup ? "提交中..." : "报名参加"}
+              </button>
+            </div>
+
+            {profile?.is_admin ? (
+              <div className="mt-4 rounded-xl bg-neutral-50 p-3">
+                <p className="text-xs text-neutral-500">
+                  报名人数：{(activitySignups[activeActivity.id] ?? []).length}
+                </p>
+                <div className="mt-2 space-y-2">
+                  {(activitySignups[activeActivity.id] ?? []).map((signup) => (
+                    <div key={signup.id} className="rounded-lg bg-white p-2">
+                      <p className="text-sm text-neutral-700">{signup.nickname}</p>
+                      <p className="text-xs text-neutral-500">{signup.contact}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            <button
+              onClick={() => setActiveActivity(null)}
+              className="mt-4 h-10 w-full rounded-full border border-neutral-200 text-sm text-neutral-700"
+            >
+              关闭
+            </button>
+          </article>
+        </section>
+      ) : null}
 
       <BottomNav active="explore" />
     </main>

@@ -5,14 +5,14 @@ import { ExploreItem } from "@/types/domain";
 const ARTICLE_KIND = "article" as const;
 const ARTICLE_CATEGORY = "心理科普";
 
-export async function listExploreItems(): Promise<ExploreItem[]> {
+export async function listExploreItems(userPhone = ""): Promise<ExploreItem[]> {
   if (!hasSupabaseConfig || !supabase) {
     throw new Error("Supabase 未配置，无法加载探索内容。");
   }
 
   const { data, error } = await supabase
     .from("activities")
-    .select("id,title,summary,content,category,created_at")
+    .select("id,title,summary,content,category,like_count,favorite_count,created_at")
     .eq("kind", ARTICLE_KIND)
     .order("created_at", { ascending: false });
 
@@ -20,12 +20,28 @@ export async function listExploreItems(): Promise<ExploreItem[]> {
     throw new Error(toChineseErrorMessage(error, "探索内容加载失败。"));
   }
 
+  let likedIds = new Set<string>();
+  let favoritedIds = new Set<string>();
+  if (userPhone) {
+    const [{ data: likes }, { data: favorites }] = await Promise.all([
+      supabase.from("activity_likes").select("activity_id").eq("user_phone", userPhone),
+      supabase.from("activity_favorites").select("activity_id").eq("user_phone", userPhone),
+    ]);
+    likedIds = new Set((likes ?? []).map((item) => String(item.activity_id)));
+    favoritedIds = new Set((favorites ?? []).map((item) => String(item.activity_id)));
+  }
+
   return (data ?? []).map((row) => ({
     id: String(row.id),
     title: String(row.title),
     summary: String((row as { summary?: string | null }).summary ?? row.content ?? ""),
+    content: String(row.content ?? ""),
     category: String(row.category ?? ARTICLE_CATEGORY),
     createdAt: String(row.created_at),
+    likeCount: Number(row.like_count ?? 0),
+    favoriteCount: Number(row.favorite_count ?? 0),
+    likedByMe: likedIds.has(String(row.id)),
+    favoritedByMe: favoritedIds.has(String(row.id)),
   }));
 }
 

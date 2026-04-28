@@ -83,6 +83,7 @@ export default function ProfilePage() {
   const [editingAvatar, setEditingAvatar] = useState("");
   const [editingBio, setEditingBio] = useState("");
   const [savingProfile, setSavingProfile] = useState(false);
+  const [editingExpanded, setEditingExpanded] = useState(false);
   const [tip, setTip] = useState("");
   const [myDiaries, setMyDiaries] = useState<DiaryEntry[]>([]);
   const [myPostFavorites, setMyPostFavorites] = useState<PostFeedItem[]>([]);
@@ -127,11 +128,28 @@ export default function ProfilePage() {
     setEditingAvatar(avatarFromProfile || user?.avatarUrl || "");
     setEditingBio(bioFromProfile || user?.bio || "");
 
+    const [myPostCountRes, myGroupCountRes] = await Promise.allSettled([
+      identity
+        ? supabase
+            ?.from("posts")
+            .select("id", { count: "exact", head: true })
+            .eq("author_phone", identity)
+        : Promise.resolve(null),
+      identity
+        ? supabase
+            ?.from("groups")
+            .select("id", { count: "exact", head: true })
+            .eq("creator_phone", identity)
+            .eq("status", "approved")
+        : Promise.resolve(null),
+    ]);
+
     setProfile({
       name: displayName || user?.name || "",
       streakDays: user?.streakDays ?? 0,
       logsCount: user?.logsCount ?? 0,
-      groupsCount: user?.groupsCount ?? 0,
+      groupsCount:
+        myGroupCountRes.status === "fulfilled" ? Number(myGroupCountRes.value?.count ?? user?.groupsCount ?? 0) : user?.groupsCount ?? 0,
       harvestCount: user?.harvestCount ?? 0,
       role: user?.role,
       avatarUrl: avatarFromProfile || user?.avatarUrl || "",
@@ -146,6 +164,16 @@ export default function ProfilePage() {
     setMyDiaries(diariesRes.status === "fulfilled" ? diariesRes.value : []);
     setMyPostFavorites(postFavsRes.status === "fulfilled" ? postFavsRes.value : []);
     setMyActivityFavorites(activityFavsRes.status === "fulfilled" ? activityFavsRes.value : []);
+    const realDiaryCount = diariesRes.status === "fulfilled" ? diariesRes.value.length : 0;
+    const realHarvestCount =
+      (postFavsRes.status === "fulfilled" ? postFavsRes.value.length : 0) +
+      (activityFavsRes.status === "fulfilled" ? activityFavsRes.value.length : 0);
+    const realPostCount = myPostCountRes.status === "fulfilled" ? Number(myPostCountRes.value?.count ?? 0) : 0;
+    setProfile((prev) => ({
+      ...prev,
+      logsCount: realDiaryCount || realPostCount || prev.logsCount,
+      harvestCount: realHarvestCount || prev.harvestCount,
+    }));
     const listErrors = [diariesRes, postFavsRes, activityFavsRes].some((item) => item.status === "rejected");
     if (listErrors && !profilesRow) {
       setTip("部分数据加载失败，已为你展示基础资料。");
@@ -290,33 +318,38 @@ export default function ProfilePage() {
       </section>
 
       <section className="mt-4 rounded-2xl bg-white p-4 shadow-sm">
-        <p className="text-xs text-neutral-400">编辑个人资料（自动通过）</p>
-        <input type="file" accept="image/*" onChange={handleAvatarUpload} className="mt-2 block w-full text-xs text-neutral-500" />
-        <input
-          value={editingName}
-          onChange={(event) => setEditingName(event.target.value)}
-          placeholder="昵称"
-          className="mt-2 h-10 w-full rounded-xl border border-neutral-200 px-3 text-sm outline-none focus:border-primary"
-        />
-        <input
-          value={editingAvatar}
-          onChange={(event) => setEditingAvatar(event.target.value)}
-          placeholder="头像链接（可选）"
-          className="mt-2 h-10 w-full rounded-xl border border-neutral-200 px-3 text-sm outline-none focus:border-primary"
-        />
-        <textarea
-          value={editingBio}
-          onChange={(event) => setEditingBio(event.target.value)}
-          placeholder="个人简介（可选）"
-          className="mt-2 h-20 w-full resize-none rounded-xl border border-neutral-200 p-3 text-sm outline-none focus:border-primary"
-        />
         <button
-          onClick={handleSaveProfile}
-          disabled={savingProfile}
-          className="mt-3 h-10 w-full rounded-full bg-primary text-sm font-semibold text-white disabled:opacity-60"
+          onClick={() => setEditingExpanded((prev) => !prev)}
+          className="flex w-full items-center justify-between text-left"
         >
-          {savingProfile ? "保存中..." : "保存资料"}
+          <p className="text-sm font-semibold text-neutral-900">修改资料</p>
+          <span className="text-xs text-neutral-500">{editingExpanded ? "收起" : "展开"}</span>
         </button>
+        {editingExpanded ? (
+          <>
+            <p className="mt-2 text-xs text-neutral-400">头像 / 昵称 / 个人简介</p>
+            <input type="file" accept="image/*" onChange={handleAvatarUpload} className="mt-2 block w-full text-xs text-neutral-500" />
+            <input
+              value={editingName}
+              onChange={(event) => setEditingName(event.target.value)}
+              placeholder="昵称"
+              className="mt-2 h-10 w-full rounded-xl border border-neutral-200 px-3 text-sm outline-none focus:border-primary"
+            />
+            <textarea
+              value={editingBio}
+              onChange={(event) => setEditingBio(event.target.value)}
+              placeholder="个人简介（可选）"
+              className="mt-2 h-20 w-full resize-none rounded-xl border border-neutral-200 p-3 text-sm outline-none focus:border-primary"
+            />
+            <button
+              onClick={handleSaveProfile}
+              disabled={savingProfile}
+              className="mt-3 h-10 w-full rounded-full bg-primary text-sm font-semibold text-white disabled:opacity-60"
+            >
+              {savingProfile ? "保存中..." : "保存资料"}
+            </button>
+          </>
+        ) : null}
         {tip ? <p className="mt-2 text-xs text-neutral-500">{tip}</p> : null}
       </section>
 
@@ -336,21 +369,6 @@ export default function ProfilePage() {
       </section>
 
       <section className="mt-5 space-y-3">
-        <article className="rounded-2xl bg-white p-4 shadow-sm">
-          <p className="text-sm font-semibold text-neutral-900">我的日记</p>
-          {myDiaries.length === 0 ? (
-            <p className="mt-2 text-sm text-neutral-500">暂无日记记录。</p>
-          ) : (
-            <div className="mt-2 space-y-2">
-              {myDiaries.slice(0, 5).map((item) => (
-                <div key={item.id} className="rounded-xl bg-neutral-50 p-3">
-                  <p className="text-xs text-primary">{item.mood}</p>
-                  <p className="mt-1 text-sm text-neutral-700">{item.content}</p>
-                </div>
-              ))}
-            </div>
-          )}
-        </article>
         <article className="rounded-2xl bg-white p-4 shadow-sm">
           <p className="text-sm font-semibold text-neutral-900">我的收藏（帖子）</p>
           {myPostFavorites.length === 0 ? (

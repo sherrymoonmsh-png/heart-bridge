@@ -114,6 +114,23 @@ create table if not exists public.activity_favorites (
   unique(activity_id, user_phone)
 );
 
+create table if not exists public.activity_comments (
+  id uuid primary key default gen_random_uuid(),
+  activity_id uuid not null references public.activities(id) on delete cascade,
+  content text not null,
+  author_name text not null,
+  author_phone text not null,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.activity_signups (
+  id uuid primary key default gen_random_uuid(),
+  activity_id uuid not null references public.activities(id) on delete cascade,
+  nickname text not null,
+  contact text not null,
+  created_at timestamptz not null default now()
+);
+
 create table if not exists public.diaries (
   id uuid primary key default gen_random_uuid(),
   user_phone text not null,
@@ -133,6 +150,8 @@ alter table public.post_favorites enable row level security;
 alter table public.activities enable row level security;
 alter table public.activity_likes enable row level security;
 alter table public.activity_favorites enable row level security;
+alter table public.activity_comments enable row level security;
+alter table public.activity_signups enable row level security;
 alter table public.diaries enable row level security;
 alter table public.profiles enable row level security;
 
@@ -162,6 +181,12 @@ create policy activity_likes_all on public.activity_likes for all to anon, authe
 
 drop policy if exists activity_favorites_all on public.activity_favorites;
 create policy activity_favorites_all on public.activity_favorites for all to anon, authenticated using (true) with check (true);
+
+drop policy if exists activity_comments_all on public.activity_comments;
+create policy activity_comments_all on public.activity_comments for all to anon, authenticated using (true) with check (true);
+
+drop policy if exists activity_signups_all on public.activity_signups;
+create policy activity_signups_all on public.activity_signups for all to anon, authenticated using (true) with check (true);
 
 drop policy if exists diaries_owner_all on public.diaries;
 create policy diaries_owner_all on public.diaries

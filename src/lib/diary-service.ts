@@ -13,6 +13,16 @@ async function getCurrentUserId(): Promise<string | null> {
   return user.id;
 }
 
+async function getCurrentUserIdentityKey(): Promise<string> {
+  if (!hasSupabaseConfig || !supabase) return "";
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
+  if (error || !user) return "";
+  return user.phone || user.email || "";
+}
+
 function mapDiaryRows(data: unknown[] | null | undefined): DiaryEntry[] {
   return (data ?? []).map((row) => {
     const r = row as Record<string, unknown>;
@@ -50,7 +60,22 @@ export async function listDiaryEntries(): Promise<DiaryEntry[]> {
   if (error) {
     throw new Error(toChineseErrorMessage(error, "日记加载失败。"));
   }
-  return mapDiaryRows(data);
+  const byUserId = mapDiaryRows(data);
+  if (byUserId.length > 0) {
+    return byUserId;
+  }
+
+  const identityKey = await getCurrentUserIdentityKey();
+  if (!identityKey) return [];
+  const { data: fallbackRows, error: fallbackError } = await supabase
+    .from("diaries")
+    .select("id,user_phone,user_id,mood,content,created_at")
+    .eq("user_phone", identityKey)
+    .order("created_at", { ascending: false });
+  if (fallbackError) {
+    throw new Error(toChineseErrorMessage(fallbackError, "日记加载失败。"));
+  }
+  return mapDiaryRows(fallbackRows);
 }
 
 /**

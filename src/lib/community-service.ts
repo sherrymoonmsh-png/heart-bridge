@@ -2,7 +2,16 @@
 
 import { toChineseErrorMessage } from "@/lib/error-message";
 import { hasSupabaseConfig, supabase } from "@/lib/supabase";
-import { ActivityItem, CommentItem, GroupItem, PostFeedItem, ReviewQueueItem, SubmissionItem } from "@/types/domain";
+import {
+  ActivityItem,
+  ActivitySignupItem,
+  ArticleCommentItem,
+  CommentItem,
+  GroupItem,
+  PostFeedItem,
+  ReviewQueueItem,
+  SubmissionItem,
+} from "@/types/domain";
 
 function ensureSupabaseReady() {
   if (!hasSupabaseConfig || !supabase) {
@@ -56,9 +65,6 @@ export async function createPost(input: {
   authorPhone: string;
   isAdmin?: boolean;
 }) {
-  if (!input.isAdmin) {
-    throw new Error("功能开发中");
-  }
   const client = ensureSupabaseReady();
   const { error } = await client.from("posts").insert({
     title: input.title,
@@ -201,7 +207,25 @@ export async function createComment(input: {
 }
 
 export async function listGroups(): Promise<GroupItem[]> {
-  return [];
+  const client = ensureSupabaseReady();
+  const { data, error } = await client
+    .from("groups")
+    .select('id,title,"desc",creator_name,creator_phone,status,rejection_reason,created_at')
+    .eq("status", "approved")
+    .order("created_at", { ascending: false });
+  if (error) {
+    throw new Error(toChineseErrorMessage(error, "小组加载失败，请稍后重试。"));
+  }
+  return (data ?? []).map((row) => ({
+    id: String(row.id),
+    title: String(row.title),
+    desc: String(row.desc),
+    status: String(row.status) as GroupItem["status"],
+    rejectionReason: String(row.rejection_reason ?? ""),
+    creatorName: String(row.creator_name ?? ""),
+    creatorPhone: String(row.creator_phone ?? ""),
+    createdAt: String(row.created_at),
+  }));
 }
 
 export async function createGroup(input: {
@@ -210,7 +234,18 @@ export async function createGroup(input: {
   creatorPhone: string;
   creatorName: string;
 }) {
-  throw new Error("功能开发中");
+  const client = ensureSupabaseReady();
+  const { error } = await client.from("groups").insert({
+    title: input.title,
+    desc: input.desc,
+    creator_phone: input.creatorPhone,
+    creator_name: input.creatorName,
+    status: "pending",
+    rejection_reason: "",
+  });
+  if (error) {
+    throw new Error(toChineseErrorMessage(error, "小组创建失败，请稍后重试。"));
+  }
 }
 
 export async function listMySubmissions(userPhone: string): Promise<SubmissionItem[]> {
@@ -218,7 +253,23 @@ export async function listMySubmissions(userPhone: string): Promise<SubmissionIt
 }
 
 export async function listReviewQueue(): Promise<ReviewQueueItem[]> {
-  return [];
+  const client = ensureSupabaseReady();
+  const { data, error } = await client
+    .from("groups")
+    .select('id,title,"desc",creator_name,creator_phone,created_at')
+    .eq("status", "pending")
+    .order("created_at", { ascending: false });
+  if (error) throw new Error(toChineseErrorMessage(error, "审核列表加载失败，请稍后重试。"));
+  return (data ?? []).map((row) => ({
+    id: `group:${String(row.id)}`,
+    sourceId: String(row.id),
+    type: "group",
+    title: String(row.title),
+    content: String(row.desc),
+    authorName: String(row.creator_name ?? "匿名用户"),
+    authorPhone: String(row.creator_phone ?? ""),
+    createdAt: String(row.created_at),
+  }));
 }
 
 export async function reviewContent(input: {
@@ -226,7 +277,27 @@ export async function reviewContent(input: {
   action: "approve" | "reject";
   reason?: string;
 }) {
-  throw new Error("功能开发中");
+  const client = ensureSupabaseReady();
+  const [entity, sourceId] = input.queueId.split(":");
+  if (entity !== "group" || !sourceId) {
+    throw new Error("暂不支持该类型审核");
+  }
+  const nextStatus = input.action === "approve" ? "approved" : "rejected";
+  const rejectionReason = input.action === "reject" ? (input.reason ?? "未通过审核") : "";
+  const { error } = await client
+    .from("groups")
+    .update({
+      status: nextStatus,
+      rejection_reason: rejectionReason,
+    })
+    .eq("id", sourceId);
+  if (error) {
+    throw new Error(toChineseErrorMessage(error, "审核操作失败，请稍后重试。"));
+  }
+}
+
+export async function listLatestActivities(userPhone: string): Promise<ActivityItem[]> {
+  return listActivities(userPhone);
 }
 
 export async function listActivities(userPhone: string): Promise<ActivityItem[]> {
@@ -375,4 +446,77 @@ export async function listMyActivityFavorites(userPhone: string): Promise<Activi
       favoriteCount: Number(row.favorite_count),
       favoritedByMe: true,
     }));
+}
+
+export async function listArticleComments(activityId: string): Promise<ArticleCommentItem[]> {
+  const client = ensureSupabaseReady();
+  const { data, error } = await client
+    .from("activity_comments")
+    .select("id,activity_id,content,author_name,author_phone,created_at")
+    .eq("activity_id", activityId)
+    .order("created_at", { ascending: false });
+  if (error) {
+    throw new Error(toChineseErrorMessage(error, "文章评论加载失败，请稍后重试。"));
+  }
+  return (data ?? []).map((row) => ({
+    id: String(row.id),
+    activityId: String(row.activity_id),
+    content: String(row.content),
+    authorName: String(row.author_name),
+    authorPhone: String(row.author_phone),
+    createdAt: String(row.created_at),
+  }));
+}
+
+export async function createArticleComment(input: {
+  activityId: string;
+  content: string;
+  authorName: string;
+  authorPhone: string;
+}) {
+  const client = ensureSupabaseReady();
+  const { error } = await client.from("activity_comments").insert({
+    activity_id: input.activityId,
+    content: input.content,
+    author_name: input.authorName,
+    author_phone: input.authorPhone,
+  });
+  if (error) {
+    throw new Error(toChineseErrorMessage(error, "文章评论失败，请稍后重试。"));
+  }
+}
+
+export async function createActivitySignup(input: {
+  activityId: string;
+  nickname: string;
+  contact: string;
+}) {
+  const client = ensureSupabaseReady();
+  const { error } = await client.from("activity_signups").insert({
+    activity_id: input.activityId,
+    nickname: input.nickname,
+    contact: input.contact,
+  });
+  if (error) {
+    throw new Error(toChineseErrorMessage(error, "报名失败，请稍后重试。"));
+  }
+}
+
+export async function listActivitySignups(activityId: string): Promise<ActivitySignupItem[]> {
+  const client = ensureSupabaseReady();
+  const { data, error } = await client
+    .from("activity_signups")
+    .select("id,activity_id,nickname,contact,created_at")
+    .eq("activity_id", activityId)
+    .order("created_at", { ascending: false });
+  if (error) {
+    throw new Error(toChineseErrorMessage(error, "报名数据加载失败，请稍后重试。"));
+  }
+  return (data ?? []).map((row) => ({
+    id: String(row.id),
+    activityId: String(row.activity_id),
+    nickname: String(row.nickname),
+    contact: String(row.contact),
+    createdAt: String(row.created_at),
+  }));
 }

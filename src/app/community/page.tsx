@@ -34,7 +34,6 @@ export default function CommunityPage() {
   const [creatingGroup, setCreatingGroup] = useState(false);
   const [error, setError] = useState("");
   const [canUseCoreActions, setCanUseCoreActions] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
   const [displayName, setDisplayName] = useState("匿名用户");
 
   const phone = getAuthedPhone();
@@ -66,12 +65,10 @@ export default function CommunityPage() {
       const authed = isAuthed();
       setCanUseCoreActions(authed);
       if (!authed || !phone) {
-        setIsAdmin(false);
         setDisplayName("匿名用户");
         return;
       }
       const profile = await getUserProfile(phone);
-      setIsAdmin(profile?.role === "admin");
       setDisplayName(profile?.name || `用户${phone.slice(-4)}`);
     };
     restore();
@@ -87,10 +84,6 @@ export default function CommunityPage() {
       setError("登录后可操作");
       return;
     }
-    if (!isAdmin) {
-      setError("功能开发中");
-      return;
-    }
     if (!title.trim() || !content.trim()) {
       setError("请填写标题和内容。");
       return;
@@ -104,7 +97,6 @@ export default function CommunityPage() {
         content: content.trim(),
         authorName: displayName,
         authorPhone: phone,
-        isAdmin: true,
       });
     } catch (err) {
       ok = false;
@@ -212,7 +204,7 @@ export default function CommunityPage() {
       });
       setGroupTitle("");
       setGroupDesc("");
-      if (!isAdmin) setError("内容需审核后展示");
+      setError("小组已提交管理端审核，通过后会展示在公开小组");
       await loadGroups();
     } catch (err) {
       setError(toChineseErrorMessage(err, "小组创建失败，请稍后重试。"));
@@ -238,36 +230,25 @@ export default function CommunityPage() {
       {!guestMode ? (
         <>
           <section className="mt-6 rounded-2xl bg-white p-4 shadow-sm">
-            <p className="text-xs text-neutral-400">发布帖子（仅管理员）</p>
-            {!isAdmin ? (
-              <button
-                onClick={() => setError("功能开发中")}
-                className="mt-2 h-10 w-full rounded-full bg-neutral-200 text-sm font-semibold text-neutral-600"
-              >
-                发布功能开发中
-              </button>
-            ) : (
-              <>
-                <input
-                  value={title}
-                  onChange={(event) => setTitle(event.target.value)}
-                  placeholder="写一个标题..."
-                  className="mt-2 h-10 w-full rounded-xl border border-neutral-200 px-3 text-sm outline-none focus:border-primary"
-                />
-                <textarea
-                  value={content}
-                  onChange={(event) => setContent(event.target.value)}
-                  placeholder="记录你此刻的情绪、想法或故事..."
-                  className="mt-2 h-24 w-full resize-none rounded-xl border border-neutral-200 p-3 text-sm outline-none focus:border-primary"
-                />
-              </>
-            )}
+            <p className="text-xs text-neutral-400">发布帖子</p>
+            <input
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              placeholder="写一个标题..."
+              className="mt-2 h-10 w-full rounded-xl border border-neutral-200 px-3 text-sm outline-none focus:border-primary"
+            />
+            <textarea
+              value={content}
+              onChange={(event) => setContent(event.target.value)}
+              placeholder="记录你此刻的情绪、想法或故事..."
+              className="mt-2 h-24 w-full resize-none rounded-xl border border-neutral-200 p-3 text-sm outline-none focus:border-primary"
+            />
             <button
               disabled={posting}
               onClick={handleCreatePost}
               className="mt-3 h-10 w-full rounded-full bg-primary text-sm font-semibold text-white disabled:opacity-60"
             >
-              {!isAdmin ? "发布功能开发中" : posting ? "发布中..." : "发布帖子"}
+              {posting ? "发布中..." : "发布帖子"}
             </button>
           </section>
 
