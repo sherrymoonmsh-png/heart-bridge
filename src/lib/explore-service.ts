@@ -45,6 +45,11 @@ export async function listExploreItems(userPhone = ""): Promise<ExploreItem[]> {
   }));
 }
 
+export async function getExploreItemById(id: string, userPhone = ""): Promise<ExploreItem | null> {
+  const rows = await listExploreItems(userPhone);
+  return rows.find((item) => item.id === id) ?? null;
+}
+
 export async function createExploreItem(input: { title: string; summary: string; authorId: string }) {
   if (!hasSupabaseConfig || !supabase) {
     throw new Error("Supabase 未配置，无法发布科普文章。");
@@ -91,4 +96,32 @@ export async function createExploreItem(input: { title: string; summary: string;
   }
 
   console.log("[发布科普文章] 插入成功, 返回:", data);
+}
+
+export async function updateExploreItem(input: { id: string; title: string; summary: string }) {
+  if (!hasSupabaseConfig || !supabase) {
+    throw new Error("Supabase 未配置，无法编辑科普文章。");
+  }
+  const { error } = await supabase
+    .from("activities")
+    .update({
+      title: input.title.trim(),
+      summary: input.summary.trim(),
+      content: input.summary.trim(),
+    })
+    .eq("id", input.id)
+    .eq("kind", ARTICLE_KIND);
+  if (error) {
+    throw new Error(toChineseErrorMessage(error, "科普文章编辑失败。"));
+  }
+}
+
+export async function deleteExploreItem(id: string) {
+  if (!hasSupabaseConfig || !supabase) {
+    throw new Error("Supabase 未配置，无法删除科普文章。");
+  }
+  const { error } = await supabase.from("activities").delete().eq("id", id).eq("kind", ARTICLE_KIND);
+  if (error) {
+    throw new Error(toChineseErrorMessage(error, "科普文章删除失败。"));
+  }
 }

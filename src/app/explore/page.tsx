@@ -9,12 +9,14 @@ import { hasSupabaseConfig, supabase } from "@/lib/supabase";
 import {
   createActivitySignup,
   createActivity,
+  deleteActivity,
   listActivitySignups,
   listActivities,
   toggleActivityFavorite,
   toggleActivityLike,
+  updateActivity,
 } from "@/lib/community-service";
-import { listExploreItems } from "@/lib/explore-service";
+import { deleteExploreItem, listExploreItems, updateExploreItem } from "@/lib/explore-service";
 import { ActivityItem, ActivitySignupItem, ExploreItem } from "@/types/domain";
 
 async function fetchProfilesRowBySession(): Promise<Record<string, unknown> | null> {
@@ -63,6 +65,8 @@ export default function ExplorePage() {
   const [signupContact, setSignupContact] = useState("");
   const [submittingSignup, setSubmittingSignup] = useState(false);
   const [activitySignups, setActivitySignups] = useState<Record<string, ActivitySignupItem[]>>({});
+  const [editingActivityId, setEditingActivityId] = useState("");
+  const [editingArticleId, setEditingArticleId] = useState("");
   const [profileHint, setProfileHint] = useState("");
   const [contentHint, setContentHint] = useState("");
 
@@ -257,6 +261,106 @@ export default function ExplorePage() {
     }
   };
 
+  const handleExportSignupsCsv = (activityId: string) => {
+    const rows = activitySignups[activityId] ?? [];
+    const header = "昵称,联系方式,报名时间";
+    const body = rows
+      .map((item) => [item.nickname, item.contact, new Date(item.createdAt).toLocaleString("zh-CN")].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","))
+      .join("\n");
+    const csv = `${header}\n${body}`;
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `activity-signups-${activityId}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleEditActivity = async (item: ActivityItem) => {
+    if (!profile?.is_admin) return;
+    setEditingActivityId(item.id);
+    const nextTitle = window.prompt("编辑活动标题", item.title) ?? "";
+    if (!nextTitle.trim()) {
+      setEditingActivityId("");
+      return;
+    }
+    const nextContent = window.prompt("编辑活动简介", item.content) ?? "";
+    if (!nextContent.trim()) {
+      setEditingActivityId("");
+      return;
+    }
+    const nextLocation = window.prompt("编辑活动地点", item.location) ?? "";
+    if (!nextLocation.trim()) {
+      setEditingActivityId("");
+      return;
+    }
+    const nextStartAt = window.prompt("编辑活动时间（YYYY-MM-DDTHH:mm）", item.startAt.slice(0, 16)) ?? "";
+    if (!nextStartAt.trim()) {
+      setEditingActivityId("");
+      return;
+    }
+    try {
+      await updateActivity({
+        id: item.id,
+        title: nextTitle,
+        content: nextContent,
+        location: nextLocation,
+        startAt: nextStartAt,
+      });
+      await loadData();
+    } catch (err) {
+      setError(toChineseErrorMessage(err, "活动编辑失败，请稍后重试。"));
+    } finally {
+      setEditingActivityId("");
+    }
+  };
+
+  const handleDeleteActivity = async (item: ActivityItem) => {
+    if (!profile?.is_admin) return;
+    if (!window.confirm(`确认删除活动「${item.title}」吗？`)) return;
+    try {
+      await deleteActivity(item.id);
+      await loadData();
+    } catch (err) {
+      setError(toChineseErrorMessage(err, "活动删除失败，请稍后重试。"));
+    }
+  };
+
+  const handleEditArticle = async (item: ExploreItem) => {
+    if (!profile?.is_admin) return;
+    setEditingArticleId(item.id);
+    const nextTitle = window.prompt("编辑文章标题", item.title) ?? "";
+    if (!nextTitle.trim()) {
+      setEditingArticleId("");
+      return;
+    }
+    const nextSummary = window.prompt("编辑文章正文", item.content || item.summary) ?? "";
+    if (!nextSummary.trim()) {
+      setEditingArticleId("");
+      return;
+    }
+    try {
+      await updateExploreItem({ id: item.id, title: nextTitle, summary: nextSummary });
+      await loadData();
+    } catch (err) {
+      setError(toChineseErrorMessage(err, "文章编辑失败，请稍后重试。"));
+    } finally {
+      setEditingArticleId("");
+    }
+  };
+
+  const handleDeleteArticle = async (item: ExploreItem) => {
+    if (!profile?.is_admin) return;
+    if (!window.confirm(`确认删除文章「${item.title}」吗？`)) return;
+    try {
+      await deleteExploreItem(item.id);
+      await loadData();
+    } catch (err) {
+      setError(toChineseErrorMessage(err, "文章删除失败，请稍后重试。"));
+    }
+  };
+
   const latestActivity = [...activities].sort((a, b) => Date.parse(b.startAt) - Date.parse(a.startAt))[0];
   const latestArticle = articles[0];
 
@@ -377,8 +481,25 @@ export default function ExplorePage() {
                     onClick={() => handleOpenActivity(item)}
                     className="rounded-full bg-primary px-3 py-1 text-xs font-semibold text-white"
                   >
-                    了解详情
+                    查看详情
                   </button>
+                  {profile?.is_admin ? (
+                    <>
+                      <button
+                        onClick={() => handleEditActivity(item)}
+                        disabled={editingActivityId === item.id}
+                        className="rounded-full bg-neutral-100 px-3 py-1 text-xs text-neutral-700"
+                      >
+                        {editingActivityId === item.id ? "编辑中..." : "编辑"}
+                      </button>
+                      <button
+                        onClick={() => handleDeleteActivity(item)}
+                        className="rounded-full bg-red-50 px-3 py-1 text-xs text-red-600"
+                      >
+                        删除
+                      </button>
+                    </>
+                  ) : null}
                 </div>
               </article>
             ))}
@@ -411,21 +532,40 @@ export default function ExplorePage() {
         {articleExpanded ? (
           <div className="mt-3 space-y-3">
             {articles.map((item) => (
-              <Link href={`/explore/article/${item.id}`} key={item.id} className="block rounded-xl border border-neutral-100 p-3">
-                <p className="text-xs text-primary">{item.category}</p>
-                <h3 className="mt-1 font-semibold text-neutral-900">{item.title}</h3>
-                <p
-                  className="mt-1 text-sm text-neutral-600"
-                  style={{
-                    display: "-webkit-box",
-                    WebkitBoxOrient: "vertical",
-                    WebkitLineClamp: 3,
-                    overflow: "hidden",
-                  }}
-                >
-                  {item.summary}
-                </p>
-              </Link>
+              <div key={item.id} className="rounded-xl border border-neutral-100 p-3">
+                <Link href={`/explore/article/${item.id}`} className="block">
+                  <p className="text-xs text-primary">{item.category}</p>
+                  <h3 className="mt-1 font-semibold text-neutral-900">{item.title}</h3>
+                  <p
+                    className="mt-1 text-sm text-neutral-600"
+                    style={{
+                      display: "-webkit-box",
+                      WebkitBoxOrient: "vertical",
+                      WebkitLineClamp: 3,
+                      overflow: "hidden",
+                    }}
+                  >
+                    {item.summary}
+                  </p>
+                </Link>
+                {profile?.is_admin ? (
+                  <div className="mt-3 flex gap-2">
+                    <button
+                      onClick={() => handleEditArticle(item)}
+                      disabled={editingArticleId === item.id}
+                      className="rounded-full bg-neutral-100 px-3 py-1 text-xs text-neutral-700"
+                    >
+                      {editingArticleId === item.id ? "编辑中..." : "编辑"}
+                    </button>
+                    <button
+                      onClick={() => handleDeleteArticle(item)}
+                      className="rounded-full bg-red-50 px-3 py-1 text-xs text-red-600"
+                    >
+                      删除
+                    </button>
+                  </div>
+                ) : null}
+              </div>
             ))}
           </div>
         ) : null}
@@ -439,34 +579,17 @@ export default function ExplorePage() {
             <p className="mt-1 text-xs text-neutral-500">{new Date(activeActivity.startAt).toLocaleString("zh-CN")}</p>
             <p className="mt-3 text-sm text-neutral-700">{activeActivity.content}</p>
 
-            <div className="mt-4 rounded-xl bg-neutral-50 p-3">
-              <p className="text-xs text-neutral-500">报名参加</p>
-              <input
-                value={signupNickname}
-                onChange={(event) => setSignupNickname(event.target.value)}
-                placeholder="昵称"
-                className="mt-2 h-10 w-full rounded-xl border border-neutral-200 px-3 text-sm outline-none focus:border-primary"
-              />
-              <input
-                value={signupContact}
-                onChange={(event) => setSignupContact(event.target.value)}
-                placeholder="联系方式"
-                className="mt-2 h-10 w-full rounded-xl border border-neutral-200 px-3 text-sm outline-none focus:border-primary"
-              />
-              <button
-                onClick={handleSubmitSignup}
-                disabled={submittingSignup}
-                className="mt-3 h-10 w-full rounded-full bg-primary text-sm font-semibold text-white disabled:opacity-60"
-              >
-                {submittingSignup ? "提交中..." : "报名参加"}
-              </button>
-            </div>
-
             {profile?.is_admin ? (
               <div className="mt-4 rounded-xl bg-neutral-50 p-3">
                 <p className="text-xs text-neutral-500">
                   报名人数：{(activitySignups[activeActivity.id] ?? []).length}
                 </p>
+                <button
+                  onClick={() => handleExportSignupsCsv(activeActivity.id)}
+                  className="mt-2 rounded-full bg-primary px-3 py-1 text-xs font-semibold text-white"
+                >
+                  导出报名人信息（CSV）
+                </button>
                 <div className="mt-2 space-y-2">
                   {(activitySignups[activeActivity.id] ?? []).map((signup) => (
                     <div key={signup.id} className="rounded-lg bg-white p-2">
@@ -476,7 +599,30 @@ export default function ExplorePage() {
                   ))}
                 </div>
               </div>
-            ) : null}
+            ) : (
+              <div className="mt-4 rounded-xl bg-neutral-50 p-3">
+                <p className="text-xs text-neutral-500">报名参加</p>
+                <input
+                  value={signupNickname}
+                  onChange={(event) => setSignupNickname(event.target.value)}
+                  placeholder="昵称"
+                  className="mt-2 h-10 w-full rounded-xl border border-neutral-200 px-3 text-sm outline-none focus:border-primary"
+                />
+                <input
+                  value={signupContact}
+                  onChange={(event) => setSignupContact(event.target.value)}
+                  placeholder="联系方式"
+                  className="mt-2 h-10 w-full rounded-xl border border-neutral-200 px-3 text-sm outline-none focus:border-primary"
+                />
+                <button
+                  onClick={handleSubmitSignup}
+                  disabled={submittingSignup}
+                  className="mt-3 h-10 w-full rounded-full bg-primary text-sm font-semibold text-white disabled:opacity-60"
+                >
+                  {submittingSignup ? "提交中..." : "报名参加"}
+                </button>
+              </div>
+            )}
 
             <button
               onClick={() => setActiveActivity(null)}

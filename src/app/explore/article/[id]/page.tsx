@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { BottomNav } from "@/components/bottom-nav";
 import { getAuthedPhone } from "@/lib/auth-store";
@@ -11,7 +11,7 @@ import {
   toggleActivityFavorite,
   toggleActivityLike,
 } from "@/lib/community-service";
-import { listExploreItems } from "@/lib/explore-service";
+import { getExploreItemById } from "@/lib/explore-service";
 import { ArticleCommentItem, ExploreItem } from "@/types/domain";
 
 export default function ExploreArticleDetailPage() {
@@ -20,24 +20,24 @@ export default function ExploreArticleDetailPage() {
   const articleId = params?.id ?? "";
   const phone = getAuthedPhone();
 
-  const [articles, setArticles] = useState<ExploreItem[]>([]);
+  const [article, setArticle] = useState<ExploreItem | null>(null);
   const [comments, setComments] = useState<ArticleCommentItem[]>([]);
   const [commentInput, setCommentInput] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const article = useMemo(() => articles.find((item) => item.id === articleId) ?? null, [articles, articleId]);
-
   const load = async () => {
     setLoading(true);
     setError("");
     try {
-      const [articleRows, commentRows] = await Promise.all([
-        listExploreItems(phone),
-        listArticleComments(articleId),
-      ]);
-      setArticles(articleRows);
-      setComments(commentRows);
+      const articleRow = await getExploreItemById(articleId, phone);
+      setArticle(articleRow);
+      try {
+        const commentRows = await listArticleComments(articleId);
+        setComments(commentRows);
+      } catch {
+        setComments([]);
+      }
     } catch (err) {
       setError(toChineseErrorMessage(err, "文章加载失败，请稍后重试。"));
     } finally {

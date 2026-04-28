@@ -23,10 +23,21 @@ function ensureSupabaseReady() {
 export async function listPosts(userPhone: string): Promise<PostFeedItem[]> {
   const client = ensureSupabaseReady();
 
-  const { data, error } = await client
+  const primary = await client
     .from("posts")
     .select("id,title,content,author_name,author_phone,like_count,comment_count,favorite_count,created_at")
     .order("created_at", { ascending: false });
+  let data = primary.data;
+  let error = primary.error;
+  if (error) {
+    // Backward compatibility for deployments without favorite_count column.
+    const fallback = await client
+      .from("posts")
+      .select("id,title,content,author_name,author_phone,like_count,comment_count,created_at")
+      .order("created_at", { ascending: false });
+    data = fallback.data;
+    error = fallback.error;
+  }
 
   if (error) {
     throw new Error(toChineseErrorMessage(error, "动态加载失败，请稍后重试。"));
@@ -66,7 +77,8 @@ export async function createPost(input: {
   isAdmin?: boolean;
 }) {
   const client = ensureSupabaseReady();
-  const { error } = await client.from("posts").insert({
+  let error: { message: string } | null = null;
+  const primary = await client.from("posts").insert({
     title: input.title,
     content: input.content,
     author_name: input.authorName,
@@ -75,6 +87,18 @@ export async function createPost(input: {
     comment_count: 0,
     favorite_count: 0,
   });
+  error = primary.error;
+  if (error) {
+    const fallback = await client.from("posts").insert({
+      title: input.title,
+      content: input.content,
+      author_name: input.authorName,
+      author_phone: input.authorPhone,
+      like_count: 0,
+      comment_count: 0,
+    });
+    error = fallback.error;
+  }
   if (error) {
     throw new Error(toChineseErrorMessage(error, "发布失败，请稍后重试。"));
   }
@@ -355,6 +379,34 @@ export async function createActivity(input: {
   if (error) throw new Error(toChineseErrorMessage(error, "活动发布失败，请稍后重试。"));
 }
 
+export async function updateActivity(input: {
+  id: string;
+  title: string;
+  content: string;
+  location: string;
+  startAt: string;
+}) {
+  const client = ensureSupabaseReady();
+  const { error } = await client
+    .from("activities")
+    .update({
+      title: input.title.trim(),
+      content: input.content.trim(),
+      summary: input.content.trim(),
+      location: input.location.trim(),
+      start_at: input.startAt,
+    })
+    .eq("id", input.id)
+    .neq("kind", "article");
+  if (error) throw new Error(toChineseErrorMessage(error, "活动编辑失败，请稍后重试。"));
+}
+
+export async function deleteActivity(activityId: string) {
+  const client = ensureSupabaseReady();
+  const { error } = await client.from("activities").delete().eq("id", activityId).neq("kind", "article");
+  if (error) throw new Error(toChineseErrorMessage(error, "活动删除失败，请稍后重试。"));
+}
+
 export async function toggleActivityLike(activityId: string, userPhone: string) {
   const client = ensureSupabaseReady();
   if (!userPhone) throw new Error("请先登录后再操作。");
@@ -456,6 +508,8 @@ export async function listArticleComments(activityId: string): Promise<ArticleCo
     .eq("activity_id", activityId)
     .order("created_at", { ascending: false });
   if (error) {
+    // Allow article page to load even when comment table isn't deployed yet.
+    if (error.message?.includes("activity_comments")) return [];
     throw new Error(toChineseErrorMessage(error, "文章评论加载失败，请稍后重试。"));
   }
   return (data ?? []).map((row) => ({
@@ -482,6 +536,9 @@ export async function createArticleComment(input: {
     author_phone: input.authorPhone,
   });
   if (error) {
+    if (error.message?.includes("activity_comments")) {
+      throw new Error("评论功能尚未启用，请联系管理员完成数据库更新。");
+    }
     throw new Error(toChineseErrorMessage(error, "文章评论失败，请稍后重试。"));
   }
 }
